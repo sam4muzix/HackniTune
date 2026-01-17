@@ -1245,6 +1245,11 @@ struct HardwareScanner {
         if btDevice.isEmpty { return (.notFound, "None") }
         return (.compatible("Generic Bluetooth"), "Generic")
     }
+    
+    static func isLaptop() -> Bool {
+        let model = Shell.run("sysctl -n hw.model")
+        return model.contains("Book")
+    }
 }
 
 // MARK: - Stability & Performance Scanner
@@ -1273,6 +1278,166 @@ struct StabilityScanner {
     }
 }
 
+// MARK: - Advanced Tools & Premium Modules (v8.0)
+struct AdvancedTools {
+    struct SMBIOS {
+        let model: String
+        let serial: String
+        let boardSerial: String
+        let uuid: String
+    }
+    
+    static func generateSMBIOS(model: String) -> SMBIOS {
+        let letters = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789"
+        let serial = String((0..<12).map{ _ in letters.randomElement()! })
+        let boardSerial = serial + String((0..<5).map{ _ in letters.randomElement()! })
+        let uuid = UUID().uuidString
+        return SMBIOS(model: model, serial: serial, boardSerial: boardSerial, uuid: uuid)
+    }
+    
+    static func getSIPStatus() -> String {
+        let status = Shell.run("csrutil status")
+        if status.contains("disabled") { return "SIP: Disabled (03000000)" }
+        return "SIP: Enabled (Normal)"
+    }
+    
+    static func getBootArgs() -> String {
+        guard let efiPath = PostInstallView.sharedMountedPath() else { return "Unknown" }
+        let configPath = "\(efiPath)/config.plist"
+        let key = ":NVRAM:Add:7C436110-AB2A-4BBB-A880-FE41995C9F82:boot-args"
+        return Shell.run("/usr/libexec/PlistBuddy -c \"Print \(key)\" \"\(configPath)\"").replacingOccurrences(of: "\"", with: "")
+    }
+    
+    static func setBootArgs(_ args: String) {
+        guard let efiPath = PostInstallView.sharedMountedPath() else { return }
+        let configPath = "\(efiPath)/config.plist"
+        let key = ":NVRAM:Add:7C436110-AB2A-4BBB-A880-FE41995C9F82:boot-args"
+        _ = Shell.run("/usr/libexec/PlistBuddy -c \"Set \(key) \(args)\" \"\(configPath)\"")
+    }
+
+    static func checkKextUpdates() -> [String: String] {
+        let kexts = ["Lilu", "WhateverGreen", "AppleALC", "VirtualSMC"]
+        var updates: [String: String] = [:]
+        for kext in kexts {
+            let latest = Shell.run("curl -s https://api.github.com/repos/acidanthera/\(kext)/releases/latest | grep tag_name | cut -d '\"' -f 4")
+            updates[kext] = latest.isEmpty ? "Check Failed" : latest
+        }
+        return updates
+    }
+    
+    static func createVaultBackup() -> String {
+        guard let efiPath = PostInstallView.sharedMountedPath() else { return "Mount EFI first" }
+        let date = Int(Date().timeIntervalSince1970)
+        let zipPath = "/tmp/EFI_Vault_\(date).zip"
+        _ = Shell.run("cd \"\(efiPath)/..\" && zip -r \"\(zipPath)\" EFI")
+        _ = Shell.run("mkdir -p ~/Documents/HackinTuneVault && cp \"\(zipPath)\" ~/Documents/HackinTuneVault/")
+        return "Backup saved to Documents/HackinTuneVault/"
+    }
+    
+    static func installModernTheme() -> String {
+        guard let efiPath = PostInstallView.sharedMountedPath() else { return "EFI Needed" }
+        let url = "https://github.com/acidanthera/OcBinaryData/archive/refs/heads/master.zip"
+        _ = Shell.run("curl -L -o /tmp/themes.zip \(url) && unzip -q /tmp/themes.zip -d /tmp/themes")
+        _ = Shell.run("cp -rf /tmp/themes/OcBinaryData-master/Resources/* \"\(efiPath)/Resources/\"")
+        return "New Icons & Themes installed to Resources/"
+    }
+}
+
+struct PremiumToolsView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @State private var smbios = AdvancedTools.generateSMBIOS(model: "iMac20,1")
+    @State private var sipStatus = "Checking..."
+    @State private var bootArgs = ""
+    @State private var kextUpdates: [String: String] = [:]
+    @State private var statusMsg = "Welcome to Premium ToolBox"
+    
+    var body: some View {
+        ZStack {
+            GreenmixTheme.bg.edgesIgnoringSafeArea(.all)
+            VStack(spacing: 15) {
+                CommonHeader(title: "Advanced ToolBox")
+                
+                HStack {
+                    Button("Back") { presentationMode.wrappedValue.dismiss() }
+                    Spacer()
+                }.padding(.horizontal)
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Section 1: SMBIOS
+                        VStack(alignment: .leading) {
+                            Text("SMBIOS Generator").font(.headline).foregroundColor(GreenmixTheme.gold)
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text("Serial: \(smbios.serial)").font(.system(size: 10, design: .monospaced))
+                                    Text("Board: \(smbios.boardSerial)").font(.system(size: 10, design: .monospaced))
+                                }
+                                Spacer()
+                                Button("New") { smbios = AdvancedTools.generateSMBIOS(model: "iMac20,1") }
+                                Button("Copy") { 
+                                    let pasteboard = NSPasteboard.general
+                                    pasteboard.clearContents()
+                                    pasteboard.setString("Serial: \(smbios.serial)\nBoard: \(smbios.boardSerial)\nUUID: \(smbios.uuid)", forType: .string)
+                                    statusMsg = "Copies to Clipboard!"
+                                }
+                            }
+                        }.padding().background(GreenmixTheme.card).cornerRadius(10)
+                        
+                        // Section 2: Boot-Args & SIP
+                        VStack(alignment: .leading) {
+                            Text("Security & Boot").font(.headline).foregroundColor(.cyan)
+                            Text("Current: \(bootArgs)").font(.caption).foregroundColor(.gray)
+                            
+                            HStack {
+                                Toggle("-v", isOn: Binding(get: { bootArgs.contains("-v") }, set: { if $0 { if !bootArgs.contains("-v") { bootArgs += " -v" } } else { bootArgs = bootArgs.replacingOccurrences(of: "-v", with: "").trimmingCharacters(in: .whitespaces) } }))
+                                Toggle("Debug", isOn: Binding(get: { bootArgs.contains("debug=0x100") }, set: { if $0 { if !bootArgs.contains("debug=0x100") { bootArgs += " debug=0x100" } } else { bootArgs = bootArgs.replacingOccurrences(of: "debug=0x100", with: "").trimmingCharacters(in: .whitespaces) } }))
+                                Toggle("Pikera", isOn: Binding(get: { bootArgs.contains("agdpmod=pikera") }, set: { if $0 { if !bootArgs.contains("agdpmod=pikera") { bootArgs += " agdpmod=pikera" } } else { bootArgs = bootArgs.replacingOccurrences(of: "agdpmod=pikera", with: "").trimmingCharacters(in: .whitespaces) } }))
+                            }.font(.caption)
+
+                            HStack {
+                                TextField("Edit boot-args", text: $bootArgs)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                Button("Apply") { AdvancedTools.setBootArgs(bootArgs); statusMsg = "Boot-args updated!" }
+                            }
+                            Text(sipStatus).font(.caption).bold().foregroundColor(.orange)
+                        }.padding().background(GreenmixTheme.card).cornerRadius(10)
+                        
+                        // Section 3: Kext Updates
+                        VStack(alignment: .leading) {
+                            Text("Kext Update Checker").font(.headline).foregroundColor(.green)
+                            ForEach(kextUpdates.sorted(by: <), id: \.key) { key, value in
+                                Text("\(key): \(value)").font(.caption)
+                            }
+                            Button("Refresh Versions") {
+                                statusMsg = "Checking GitHub..."
+                                kextUpdates = AdvancedTools.checkKextUpdates()
+                                statusMsg = "Versions Updated"
+                            }
+                        }.padding().background(GreenmixTheme.card).cornerRadius(10)
+                        
+                        // Section 4: Vault
+                        Button(action: { statusMsg = AdvancedTools.createVaultBackup() }) {
+                            HStack {
+                                Image(systemName: "safe.fill")
+                                Text("Create EFI Vault Backup")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding().background(Color.blue).cornerRadius(10)
+                        }.buttonStyle(PlainButtonStyle())
+                        
+                    }.padding()
+                }
+                
+                Text(statusMsg).foregroundColor(GreenmixTheme.accent).font(.caption)
+                Spacer()
+            }
+        }.onAppear {
+            sipStatus = AdvancedTools.getSIPStatus()
+            bootArgs = AdvancedTools.getBootArgs()
+        }
+    }
+}
+
 // MARK: - Post Install View
 struct PostInstallView: View {
     var onBack: () -> Void
@@ -1284,6 +1449,16 @@ struct PostInstallView: View {
     
     @State private var wifiStatus: (status: HardwareScanner.DeviceStatus, vendor: String) = (.notFound, "Unknown")
     @State private var btStatus: (status: HardwareScanner.DeviceStatus, vendor: String) = (.notFound, "Unknown")
+    
+    @State private var showingPremiumTools = false
+    
+    static func sharedMountedPath() -> String? {
+         _ = Shell.run("diskutil list | grep EFI | awk '{print $6}' | head -1 | xargs sudo diskutil mount 2>/dev/null")
+         Thread.sleep(forTimeInterval: 0.2)
+         if FileManager.default.fileExists(atPath: "/Volumes/EFI/EFI/OC/config.plist") { return "/Volumes/EFI/EFI/OC" }
+         if FileManager.default.fileExists(atPath: "/Volumes/ESP/EFI/OC/config.plist") { return "/Volumes/ESP/EFI/OC" }
+         return nil
+    }
     
     var body: some View {
         ZStack {
@@ -1387,8 +1562,25 @@ struct PostInstallView: View {
                     DashboardButton(title: "Smart Optimizer", subtitle: "Fix Stability & PM", icon: "wand.and.rays", color: .orange) {
                         runSmartOptimization()
                     }
+                    
+                    DashboardButton(title: "Premium ToolBox", subtitle: "SMBIOS, SIP, Vault", icon: "crown.fill", color: GreenmixTheme.gold) {
+                        showingPremiumTools = true
+                    }
+                    
+                    if HardwareScanner.isLaptop() {
+                        DashboardButton(title: "Laptop Fixes", subtitle: "Battery & Trackpad", icon: "laptopcomputer", color: .orange) {
+                            injectKext(name: "SMCBatteryManager", url: "https://github.com/acidanthera/VirtualSMC/releases/download/1.3.2/VirtualSMC-1.3.2-RELEASE.zip")
+                        }
+                    }
+                    
+                    DashboardButton(title: "Install Themes", subtitle: "Apple Icons Pack", icon: "photo.on.rectangle", color: .purple) {
+                        statusMessage = AdvancedTools.installModernTheme()
+                    }
                 }
                 .padding()
+                .sheet(isPresented: $showingPremiumTools) {
+                    PremiumToolsView()
+                }
                 
                 Spacer()
                 
