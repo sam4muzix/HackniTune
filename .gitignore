@@ -1,0 +1,46 @@
+# Build artifacts
+build/
+*.app/
+*.app.zip
+HackinTune_Native.zip
+*.icns
+*.o
+*.out
+IconProcessor
+TransparentMaker
+
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project Metadata & Internal Tracking
+*.metadata.json
+*.resolved
+*.resolved.*
+task.md
+walkthrough.md
+implementation_plan.md
+app_roadmap.md
+hackintosh_master_prompt.md
+
+# Temporary & Backups
+*.bak
+*.tmp
+*.log
+/tmp/
+
+# App related / Intermediate assets
+HackinTune.iconset/
+icon_source.png
+icon_transparent.png
+logo_transparent.png
+apple_mighty_icon_source_*.png
+flat_mighty_icon_source_*.png
+mighty_3d_*.png
+mighty_icon_source_*.png
+test_usb.zip
